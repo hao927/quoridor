@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quoridor 3D - Disconnect Detection</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+            background-color: #111;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            color: white;
+        }
+
+        /* --- Screens --- */
+        .screen-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s;
+        }
+
+        #start-screen { z-index: 2001; background: url('https://images.unsplash.com/photo-1611195974226-a6a9be9dd763?q=80&w=1925&auto=format&fit=crop') center/cover no-repeat; }
+        #start-screen::before { content:''; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:-1; }
+        
+        #settings-menu { display: none; background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(8px); z-index: 2002; }
+        #lobby-screen { display: none; background: rgba(10, 10, 10, 0.95); z-index: 2002; }
+
+        h1 { font-size: 60px; margin-bottom: 40px; text-shadow: 0 0 30px rgba(255,255,255,0.3); text-align: center; letter-spacing: 2px; }
+        h2 { font-size: 32px; margin-bottom: 20px; color: #eee; }
+        
+        .menu-btn {
+            background: linear-gradient(135deg, #448aff, #1976d2);
+            border: none;
+            color: white;
+            padding: 20px 40px;
+            margin: 10px;
+            font-size: 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: 0.2s;
+            width: 320px;
+            text-align: center;
+            -webkit-tap-highlight-color: transparent;
+            font-weight: bold;
+        }
+        .menu-btn:active { transform: scale(0.95); filter: brightness(0.8); }
+        .menu-btn.ai { background: linear-gradient(135deg, #7b1fa2, #4a148c); }
+        .menu-btn.online { background: linear-gradient(135deg, #f57c00, #e65100); }
+        .menu-btn.secondary { background: #444; border: 1px solid #666; font-size: 18px; padding: 15px 30px; }
+        .menu-btn.mode-switch { background: linear-gradient(135deg, #009688, #00796b); }
+        .menu-btn.small { width: auto; padding: 10px 20px; font-size: 16px; margin: 5px; }
+        .menu-btn.cancel { background: #d32f2f; width: 100%; max-width: 500px; margin: 10px 0 0 0; }
+
+        /* Lobby & Modal Styles */
+        .lobby-container { 
+            width: 90%; max-width: 500px; height: 75%; 
+            background: rgba(30,30,30,0.6); border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: flex; flex-direction: column; padding: 25px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5); backdrop-filter: blur(10px);
+        }
+        .room-list { flex: 1; overflow-y: auto; margin: 15px 0; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 5px; border: 1px solid rgba(255,255,255,0.05); }
+        .room-item {
+            display: flex; justify-content: space-between; align-items: center;
+            background: linear-gradient(90deg, rgba(255,255,255,0.05), transparent);
+            margin-bottom: 8px; padding: 15px; 
+            border-radius: 8px; cursor: pointer; transition: 0.2s; border-left: 4px solid #448aff;
+        }
+        .room-item:hover { background: rgba(255,255,255,0.1); transform: translateX(5px); }
+        .room-item.private { border-left-color: #ff5252; }
+        .room-name { font-weight: bold; font-size: 16px; color: #fff; }
+        .room-status { font-size: 12px; color: #aaa; margin-top: 4px; }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 3000; backdrop-filter: blur(5px); }
+        .modal-content { background: #222; padding: 30px; border-radius: 16px; width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); border: 1px solid #444; text-align: center; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 12px; margin: 10px 0; background: #111; border: 1px solid #555; color: white; border-radius: 8px; font-size: 16px; text-align: center; box-sizing: border-box; outline: none; }
+        input:focus { border-color: #448aff; }
+
+        #victory-screen { 
+            display: none; z-index: 2003; background: rgba(0, 0, 0, 0.95); cursor: pointer;
+        }
+        .victory-title {
+            font-size: 60px; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 5px;
+            animation: popIn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .victory-subtitle { font-size: 20px; color: #aaa; animation: fadeIn 2s ease-in; }
+        
+        @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 80% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* --- UI Overlay --- */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column; justify-content: space-between;
+        }
+
+        #settings-btn {
+            position: absolute; top: 20px; left: 20px; width: 50px; height: 50px;
+            background: rgba(50, 50, 50, 0.8); border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2); color: white; font-size: 24px;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; pointer-events: auto; z-index: 150;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        #settings-btn:active { transform: scale(0.9); }
+
+        #divider {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+            background: rgba(255,255,255,0.1); z-index: 100; transition: 0.3s;
+        }
+
+        /* Status Bar */
+        #status-bar {
+            position: absolute;
+            background: rgba(20, 20, 20, 0.85); backdrop-filter: blur(10px);
+            padding: 10px 40px; border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #eee; font-size: 18px; font-weight: bold;
+            pointer-events: auto; z-index: 101;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5); white-space: nowrap; transition: 0.3s;
+            top: 20px; left: 50%; transform: translateX(-50%);
+        }
+
+        /* Wall Docks */
+        .wall-dock-container {
+            position: absolute; width: 35%; height: 80px;
+            background: rgba(0,0,0,0.5); border-radius: 16px;
+            display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 15px;
+            pointer-events: auto; transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border: 1px solid transparent; z-index: 102;
+        }
+        
+        #dock-p1 { bottom: 20px; left: 2%; }
+        #dock-p2 { bottom: 20px; right: 2%; }
+
+        /* Single Mode Adjustments */
+        .mode-single #status-bar {
+            top: 50%; right: 20px; left: auto; transform: translateY(-50%);
+            padding: 20px 10px; writing-mode: vertical-rl; text-orientation: upright;
+            border-radius: 16px;
+        }
+        .mode-single #dock-p1 { bottom: 20px; left: 50%; transform: translateX(-50%); width: 40%; }
+        .mode-single #dock-p2 { top: 20px; left: 50%; transform: translateX(-50%) rotate(180deg); width: 40%; }
+
+        /* Online Mode Dock Centering */
+        .mode-online #dock-p1 { left: 50%; transform: translateX(-50%); bottom: 20px; }
+        .mode-online #dock-p2 { left: 50%; transform: translateX(-50%); bottom: 20px; }
+
+        .wall-dock-container.active {
+            background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3);
+            box-shadow: 0 0 15px rgba(255,255,255,0.1);
+        }
+        .wall-dock-container.inactive { opacity: 0.3; pointer-events: none; filter: grayscale(1); }
+
+        .wall-item {
+            width: 14px; height: 50px; background: #d4a373; border-radius: 4px;
+            cursor: grab; box-shadow: 0 2px 5px rgba(0,0,0,0.5); position: relative;
+        }
+        .wall-item.dragging { opacity: 0; }
+        
+        .dock-label {
+            position: absolute; top: -25px; font-size: 14px; color: #aaa;
+            font-weight: bold; text-shadow: 0 1px 2px black; width: 100%; text-align: center;
+        }
+
+        #controls-center {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; pointer-events: auto; z-index: 200; transition: 0.3s;
+        }
+        .mode-single #controls-center { bottom: 50%; flex-direction: column; left: 20px; right: auto; transform: translateY(50%); }
+
+        .action-btn {
+            background: #444; color: white; border: 1px solid rgba(255,255,255,0.3);
+            padding: 12px 24px; border-radius: 12px; font-size: 16px; cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3); -webkit-tap-highlight-color: transparent;
+        }
+        .action-btn:active { transform: scale(0.95); }
+        #undo-btn { background: #d32f2f; }
+
+        #ai-thinking {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(123, 31, 162, 0.9); color: white;
+            padding: 8px 16px; border-radius: 20px;
+            display: none; z-index: 102; box-shadow: 0 0 15px rgba(123, 31, 162, 0.6);
+        }
+
+        .view-label {
+            position: absolute; top: 20px; font-size: 14px; color: rgba(255,255,255,0.4);
+            font-weight: bold; text-transform: uppercase;
+            background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px;
+        }
+        #label-p1 { left: 80px; } 
+        #label-p2 { right: 20px; }
+
+        #toast { 
+            position: absolute; bottom: 60%; left: 50%; transform: translateX(-50%); 
+            background: rgba(0,0,0,0.8); color: white; padding: 15px 30px; border-radius: 8px; 
+            z-index: 3000; opacity: 0; transition: opacity 0.3s; pointer-events: none; 
+        }
+
+    </style>
+</head>
+<body class="mode-split">
+
+    <div id="start-screen" class="screen-overlay">
+        <h1>Quoridor 3D</h1>
+        <button class="menu-btn" onclick="startGame('pvp')">👥 雙人對戰 (PvP)</button>
+        <button class="menu-btn ai" onclick="startGame('pve')">🤖 挑戰 AI (PvE)</button>
+        <button class="menu-btn online" onclick="openLobby()">🌐 線上對戰 (Online)</button>
+    </div>
+
+    <div id="lobby-screen" class="screen-overlay">
+        <h2 style="margin-bottom:10px;">線上遊戲大廳</h2>
+        <div class="lobby-container">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span id="player-id-display" style="color:#00e676; font-size:14px; font-family:monospace;">連線中...</span>
+                <button onclick="showCreateRoom()" class="menu-btn small" style="background:#00c853;">+ 建立房間</button>
+            </div>
+            <div class="room-list" id="room-list"><div style="text-align:center; color:#888; padding:30px;">載入中...</div></div>
+            <button class="menu-btn cancel" onclick="closeLobby()">返回主選單</button>
+        </div>
+    </div>
+
+    <div id="create-modal" class="modal">
+        <div class="modal-content">
+            <h3>建立新房間</h3>
+            <input type="text" id="new-room-name" placeholder="房間名稱" maxlength="10">
+            <div style="margin:15px 0; text-align: left; padding-left: 10px;">
+                <input type="checkbox" id="is-private" onchange="togglePasswordInput()" style="width: auto;">
+                <label for="is-private" style="color: #aaa; cursor: pointer;">設定密碼</label>
+            </div>
+            <input type="number" id="room-password" placeholder="6 位數密碼" style="display:none;" oninput="if(this.value.length>6) this.value=this.value.slice(0,6);">
+            <button class="menu-btn small online" onclick="createRoom()">建立</button>
+            <button class="menu-btn small secondary" onclick="document.getElementById('create-modal').style.display='none'">取消</button>
+        </div>
+    </div>
+
+    <div id="password-modal" class="modal">
+        <div class="modal-content">
+            <h3>🔒 輸入房間密碼</h3>
+            <p id="join-room-name" style="color:#00e676; margin:5px 0; font-size:14px;"></p>
+            <input type="number" id="join-password" placeholder="6 位數密碼">
+            <button class="menu-btn small online" onclick="submitPassword()">加入</button>
+            <button class="menu-btn small secondary" onclick="closePasswordModal()">取消</button>
+        </div>
+    </div>
+
+    <div id="waiting-modal" class="modal">
+        <div class="modal-content">
+            <h3>等待對手加入...</h3>
+            <div style="font-size:40px; margin:20px 0; animation: spin 2s infinite linear;">⏳</div>
+            <p>房號: <span id="wait-room-id" style="color:#00e676; font-family:monospace; font-weight:bold;"></span></p>
+            <button class="menu-btn cancel" onclick="leaveRoom()">取消 / 離開</button>
+        </div>
+    </div>
+
+    <div id="settings-menu" class="screen-overlay">
+        <h1>設定</h1>
+        <button class="menu-btn mode-switch" id="mode-switch-btn" onclick="switchViewMode()">切換模式: <span id="mode-text">電腦 (左右分割)</span></button>
+        <button class="menu-btn" onclick="toggleSettings()">▶ 繼續遊戲</button>
+        <button class="menu-btn secondary" onclick="resetGame(true)">↺ 重新開始</button>
+        <button class="menu-btn secondary" onclick="resetGame(true)">≡ 回主選單</button>
+    </div>
+
+    <div id="victory-screen" class="screen-overlay" onclick="resetGame(true)">
+        <div class="victory-title" id="winner-text">P1 獲勝!</div>
+        <div class="victory-subtitle">點擊螢幕回到主選單</div>
+    </div>
+
+    <div id="ui-layer">
+        <button id="settings-btn" onclick="toggleSettings()">⚙️</button>
+
+        <div id="divider"></div>
+        <div id="label-p1" class="view-label">P1 (紅)</div>
+        <div id="label-p2" class="view-label">P2 (藍)</div>
+
+        <div id="status-bar">
+            <span id="turn-msg" style="color: #ff5252">P1 回合</span>
+        </div>
+        
+        <div id="ai-thinking">✨ 電腦思考中...</div>
+
+        <div id="controls-center">
+            <button id="undo-btn" class="action-btn" onclick="undoMove(event)" ontouchstart="undoMove(event)">↩ 悔棋</button>
+            </div>
+
+        <div id="dock-p1" class="wall-dock-container active"><div class="dock-label">P1 牆壁</div></div>
+        <div id="dock-p2" class="wall-dock-container"><div class="dock-label">P2 牆壁</div></div>
+
+        <div id="toast">訊息</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script>
+        // --- Firebase Config ---
+        const firebaseConfig = { apiKey: "AIzaSyB5WQbvlEIm7J5wB9x_uuSMptSkkQ1Q1bE", authDomain: "quoridor-b1eb3.firebaseapp.com", projectId: "quoridor-b1eb3", storageBucket: "quoridor-b1eb3.firebasestorage.app", messagingSenderId: "976848451023", appId: "1:976848451023:web:b2db4117219ec12d69ceba", measurementId: "G-FE4G3KB80G" };
+        
+        const BOARD_SIZE = 9;
+        const CELL_W = 10;
+        const GAP_W = 2.5;
+        const BOARD_W = BOARD_SIZE * CELL_W + (BOARD_SIZE - 1) * GAP_W;
+        const DRAG_OFFSET_PIXELS = 100;
+
+        const COLORS = {
+            boardBase: 0x3e2723,
+            cellTop: 0x5d4037,
+            wall: 0xeecc99,
+            p1: 0xd32f2f,
+            p2: 0x1976d2,
+            highlight: 0x4caf50,
+            wallGhostValid: 0xeecc99, 
+            wallGhostInvalid: 0xff5252
+        };
+
+        // --- Game State & Firebase Vars ---
+        let db, auth, currentUser, unsubscribeRooms, unsubscribeGame, currentRoomId;
+        let heartbeatInterval; // Timer for checking connection
+        
+        let state = {
+            started: false,
+            paused: false,
+            viewMode: 'split',
+            turn: 1, 
+            walls: { 1: 10, 2: 10 },
+            pos: { 1: {x:4, y:0, goal:8}, 2: {x:4, y:8, goal:0} },
+            placedWalls: new Set(),
+            drag: { active: false, orientation: 'h', valid: false, gx: -1, gy: -1, sourceEl: null },
+            gameType: 'pvp', 
+            isAiThinking: false,
+            history: [],
+            online: { myPid: 1, lastProcessedTs: 0 },
+            processing: false,
+            isAnimating: false,
+            lastOpponentSeen: 0 // For disconnect detection
+        };
+
+        let scene, renderer;
+        let cameraP1, cameraP2, cameraSingle;
+        let objects = { pawns: {}, ghostWall: null, highlights: [], wallGroup: null };
+        let raycaster, mouse, dragPlane;
+        let renderRequested = false;
+        
+        const audio = {
+            move: new Audio('https://assets.mixkit.co/active_storage/sfx/2052/2052-preview.mp3'),
+            drag: new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'),
+            wall: new Audio('https://assets.mixkit.co/active_storage/sfx/2053/2053-preview.mp3'),
+            ai: new Audio('https://assets.mixkit.co/active_storage/sfx/2872/2872-preview.mp3'),
+            win: new Audio('https://assets.mixkit.co/active_storage/sfx/2069/2069-preview.mp3')
+        };
+        Object.values(audio).forEach(a => a.volume = 0.5);
+
+        // --- Firebase Init ---
+        function initFirebase() { 
+            try { 
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig); 
+                db = firebase.firestore(); 
+                auth = firebase.auth(); 
+                auth.signInAnonymously().then(c=>{
+                    currentUser=c.user; 
+                    document.getElementById('player-id-display').innerText=`ID: ${currentUser.uid.substring(0,6)}`;
+                }).catch(e=>showToast("連線失敗")); 
+            } catch(e){ console.error(e); } 
+        }
+
+        // --- Optimization: Request Render ---
+        function requestRender() {
+            if (!renderRequested) {
+                renderRequested = true;
+                requestAnimationFrame(renderLoop);
+            }
+        }
+
+        function startGame(type) {
+            state.gameType = type;
+            state.started = true;
+            state.processing = false;
+            document.getElementById('start-screen').style.opacity = 0;
+            document.getElementById('lobby-screen').style.display = 'none';
+
+            // Reset UI Visibility
+            document.getElementById('undo-btn').style.display = 'block';
+            document.getElementById('mode-switch-btn').style.display = 'block';
+
+            if (type === 'online') {
+                state.viewMode = 'online'; 
+                document.getElementById('undo-btn').style.display = 'none';
+                document.getElementById('mode-switch-btn').style.display = 'none';
+                document.getElementById('settings-menu').style.display = 'none';
+                
+                if (currentRoomId) {
+                    subscribeToGame(currentRoomId);
+                    startHeartbeat(); // Start disconnection check
+                }
+            } else if (type === 'pve') {
+                state.viewMode = 'single';
+                state.online.myPid = 1;
+            } else {
+                state.viewMode = 'split';
+                state.online.myPid = 1;
+            }
+            
+            setTimeout(() => {
+                document.getElementById('start-screen').style.display = 'none';
+                updateViewModeUI();
+                renderWallDocks();
+                updateHUD();
+                if(type !== 'online' || state.turn === state.online.myPid) showValidMoves();
+                requestRender();
+            }, 300);
+
+            if (THREE.AudioContext) THREE.AudioContext.getContext().resume();
+        }
+
+        function resetGame(toTitle = false) {
+            state.started = false;
+            state.paused = false;
+            state.turn = 1;
+            state.walls = { 1: 10, 2: 10 };
+            state.pos = { 1: {x:4, y:0, goal:8}, 2: {x:4, y:8, goal:0} };
+            state.placedWalls = new Set();
+            state.history = [];
+            state.isAiThinking = false;
+            state.processing = false;
+            state.online.lastProcessedTs = 0;
+            
+            // Clean up heartbeat
+            if(heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+            
+            if(unsubscribeGame){ unsubscribeGame(); unsubscribeGame=null; } 
+            if(state.gameType==='online' && currentRoomId){ 
+                if(state.online.myPid===1) db.collection('rooms').doc(currentRoomId).delete().catch(()=>{}); 
+                else db.collection('rooms').doc(currentRoomId).update({"players.p2":firebase.firestore.FieldValue.delete()}).catch(()=>{}); 
+                currentRoomId=null; 
+            }
+            state.online.myPid = 1;
+
+            document.getElementById('victory-screen').style.display = 'none';
+            document.getElementById('settings-menu').style.display = 'none';
+            document.getElementById('ai-thinking').style.display = 'none';
+            document.getElementById('create-modal').style.display = 'none';
+            document.getElementById('password-modal').style.display = 'none';
+            document.getElementById('waiting-modal').style.display = 'none';
+            
+            if (toTitle) {
+                const start = document.getElementById('start-screen');
+                start.style.display = 'flex';
+                start.style.opacity = 1;
+                document.getElementById('lobby-screen').style.display = 'none';
+                state.viewMode = 'split';
+                updateViewModeUI();
+            }
+
+            while(objects.wallGroup.children.length > 0){ 
+                objects.wallGroup.remove(objects.wallGroup.children[0]); 
+            }
+            objects.highlights.forEach(h=>scene.remove(h)); objects.highlights=[];
+
+            [1, 2].forEach(id => {
+                const p = getGridPos(state.pos[id].x, state.pos[id].y);
+                const v = new THREE.Vector3(p.x, 3, p.z);
+                objects.pawns[id].target.copy(v);
+                objects.pawns[id].mesh.position.copy(v);
+            });
+
+            renderWallDocks();
+            updateHUD();
+            requestRender();
+        }
+
+        function toggleSettings() {
+            if(state.gameType==='online') return;
+            state.paused = !state.paused;
+            document.getElementById('settings-menu').style.display = state.paused ? 'flex' : 'none';
+            requestRender();
+        }
+
+        function switchViewMode() {
+            if(state.gameType==='online') return;
+            state.viewMode = state.viewMode === 'split' ? 'single' : 'split';
+            updateViewModeUI();
+            requestRender();
+        }
+
+        function updateViewModeUI() {
+            document.body.className = `mode-${state.viewMode}`;
+            
+            let txt = '電腦 (左右分割)';
+            if (state.viewMode === 'single') txt = '平板 (共用棋盤)';
+            else if (state.viewMode === 'online') txt = '線上對戰';
+
+            document.getElementById('mode-text').innerText = txt;
+            document.getElementById('divider').style.display = state.viewMode === 'split' ? 'block' : 'none';
+            
+            const isSplit = state.viewMode === 'split';
+            
+            document.getElementById('label-p1').style.display = (isSplit || (state.viewMode==='online' && state.online.myPid===1)) ? 'block' : 'none';
+            document.getElementById('label-p2').style.display = (isSplit || (state.viewMode==='online' && state.online.myPid===2)) ? 'block' : 'none';
+            
+            if (state.viewMode === 'online') {
+                document.getElementById('dock-p1').style.display = state.online.myPid === 1 ? 'flex' : 'none';
+                document.getElementById('dock-p2').style.display = state.online.myPid === 2 ? 'flex' : 'none';
+            } else {
+                document.getElementById('dock-p1').style.display = 'flex';
+                document.getElementById('dock-p2').style.display = 'flex';
+            }
+            
+            renderWallDocks();
+        }
+
+        function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+        function saveHistory() {
+            if(state.gameType === 'online') return;
+            const snapshot = {
+                turn: state.turn,
+                walls: deepClone(state.walls),
+                pos: deepClone(state.pos),
+                placedWalls: Array.from(state.placedWalls)
+            };
+            state.history.push(snapshot);
+            if(state.history.length > 50) state.history.shift();
+            updateHUD();
+        }
+
+        function undoMove(e) {
+            if(e) { e.preventDefault(); e.stopPropagation(); }
+            if(state.gameType === 'online' || state.history.length === 0 || state.isAiThinking) return;
+            
+            let steps = (state.gameType === 'pve' && state.turn === 1 && state.history.length >= 2) ? 2 : 1;
+            let targetState;
+            for(let i=0; i<steps; i++) targetState = state.history.pop();
+
+            if(targetState) {
+                state.turn = targetState.turn;
+                state.walls = targetState.walls;
+                state.pos = targetState.pos;
+                state.placedWalls = new Set(targetState.placedWalls);
+                
+                while(objects.wallGroup.children.length > 0) objects.wallGroup.remove(objects.wallGroup.children[0]);
+                state.placedWalls.forEach(wStr => {
+                    const [x, y, o] = wStr.split(',');
+                    createWallMesh(parseInt(x), parseInt(y), o, false);
+                });
+
+                [1, 2].forEach(id => {
+                    const p = getGridPos(state.pos[id].x, state.pos[id].y);
+                    const v = new THREE.Vector3(p.x, 3, p.z);
+                    objects.pawns[id].target.copy(v);
+                    objects.pawns[id].mesh.position.copy(v);
+                });
+
+                renderWallDocks();
+                updateHUD();
+                showValidMoves();
+                state.isAiThinking = false;
+                document.getElementById('ai-thinking').style.display = 'none';
+                requestRender();
+            }
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.setScissorTest(true); 
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+            
+            const aspectHalf = (window.innerWidth/2) / window.innerHeight;
+            const aspectFull = window.innerWidth / window.innerHeight;
+
+            cameraP1 = new THREE.PerspectiveCamera(40, aspectHalf, 0.1, 1000);
+            cameraP1.position.set(0, 200, -140); cameraP1.lookAt(0, 0, 10);
+            
+            cameraP2 = new THREE.PerspectiveCamera(40, aspectHalf, 0.1, 1000);
+            cameraP2.position.set(0, 200, 140); cameraP2.lookAt(0, 0, -10);
+            
+            cameraSingle = new THREE.PerspectiveCamera(45, aspectFull, 0.1, 1000);
+            cameraSingle.position.set(0, 240, 0); 
+            cameraSingle.up.set(0, 0, 1); 
+            cameraSingle.lookAt(0, 0, 0);
+
+            setupLighting(); createBoard(); createPawns(); 
+            objects.wallGroup = new THREE.Group(); scene.add(objects.wallGroup);
+            createGhostWall();
+            
+            raycaster = new THREE.Raycaster(); mouse = new THREE.Vector2();
+            dragPlane = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), new THREE.MeshBasicMaterial({visible:false}));
+            dragPlane.rotation.x = -Math.PI/2; dragPlane.position.y = 8; scene.add(dragPlane);
+
+            setupEvents(); 
+            requestRender(); 
+            initFirebase();
+            
+            // Clean up player on tab close
+            window.addEventListener('beforeunload', () => {
+                if(currentRoomId) leaveRoom();
+            });
+        }
+        function setupLighting() {
+            const a = new THREE.HemisphereLight(0xffeeb1, 0x080820, 0.4); scene.add(a);
+            const m = new THREE.DirectionalLight(0xfffaf0, 1.2); m.position.set(30, 80, 50); m.castShadow = true;
+            m.shadow.mapSize.width = 2048; m.shadow.mapSize.height = 2048; scene.add(m);
+            const f = new THREE.PointLight(0xccccff, 0.4); f.position.set(-30, 50, -30); scene.add(f);
+        }
+        function createBoard() {
+            const g = new THREE.Group();
+            const b = new THREE.Mesh(new THREE.BoxGeometry(BOARD_W+6, 2, BOARD_W+6), new THREE.MeshStandardMaterial({color:COLORS.boardBase, roughness:0.8}));
+            b.position.y = -1; b.receiveShadow=true; g.add(b);
+            const gm = new THREE.BoxGeometry(CELL_W, 1.5, CELL_W);
+            const mm = new THREE.MeshStandardMaterial({color:COLORS.cellTop, roughness:0.5});
+            for(let y=0; y<BOARD_SIZE; y++) for(let x=0; x<BOARD_SIZE; x++) {
+                const m=new THREE.Mesh(gm,mm); const p=getGridPos(x,y);
+                m.position.set(p.x, 0.75, p.z); m.receiveShadow=true; m.castShadow=true; g.add(m);
+            }
+            scene.add(g);
+        }
+        function createPawns() {
+            const g = new THREE.CylinderGeometry(2.5, 3.5, 6, 32); const h = new THREE.SphereGeometry(3, 32, 16); h.translate(0,4,0);
+            [1,2].forEach(id=>{
+                const gr=new THREE.Group(); const m=new THREE.MeshStandardMaterial({color:id===1?COLORS.p1:COLORS.p2, roughness:0.2});
+                gr.add(new THREE.Mesh(g,m)); gr.add(new THREE.Mesh(h,m)); gr.traverse(o=>{if(o.isMesh)o.castShadow=true;});
+                const p=getGridPos(state.pos[id].x,state.pos[id].y); gr.position.set(p.x,3,p.z); scene.add(gr);
+                objects.pawns[id]={mesh:gr, target:new THREE.Vector3(p.x,3,p.z)};
+            });
+        }
+        function createGhostWall() {
+            const g = new THREE.BoxGeometry(CELL_W*2+GAP_W, 4, GAP_W*0.9);
+            const m = new THREE.MeshBasicMaterial({color:COLORS.wall, transparent:true, opacity:0.6});
+            objects.ghostWall = new THREE.Mesh(g,m); objects.ghostWall.visible=false; scene.add(objects.ghostWall);
+        }
+        function createWallMesh(x, y, o, anim=true) {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(CELL_W*2+GAP_W, 3.5, GAP_W*0.95), new THREE.MeshStandardMaterial({color:COLORS.wall, roughness:0.5}));
+            const p = getWallPos(x, y, o); m.position.set(p.x, 10, p.z); m.rotation.y = p.angle;
+            m.castShadow=true; m.receiveShadow=true; 
+            if(anim) {
+                m.userData={targetY:1.5};
+                state.isAnimating = true;
+                requestRender();
+            } else m.position.y=1.5;
+            objects.wallGroup.add(m);
+        }
+
+        function getGridPos(gx, gy) {
+            const st = CELL_W + GAP_W; const sx = -(BOARD_W/2) + CELL_W/2; const sz = -(BOARD_W/2) + CELL_W/2;
+            return { x: sx + gx * st, z: sz + gy * st };
+        }
+        function getWallPos(gx, gy, o) {
+            const st = CELL_W + GAP_W; const s = -(BOARD_W/2) + CELL_W + GAP_W/2;
+            return { x: s + gx * st, z: s + gy * st, angle: o==='h'?0:Math.PI/2 };
+        }
+        function canStep(x1,y1,x2,y2) {
+            if(x2<0||x2>=9||y2<0||y2>=9)return false;
+            if(x1===x2){ const r=Math.min(y1,y2); if(state.placedWalls.has(`${x1},${r},h`)||state.placedWalls.has(`${x1-1},${r},h`))return false; }
+            else{ const c=Math.min(x1,x2); if(state.placedWalls.has(`${c},${y1},v`)||state.placedWalls.has(`${c},${y1-1},v`))return false; }
+            return true;
+        }
+        function getValidMoves(pid) {
+            const m=[]; const p=state.pos[pid]; const opp=state.pos[pid===1?2:1];
+            [{x:0,y:1},{x:0,y:-1},{x:1,y:0},{x:-1,y:0}].forEach(d=>{
+                const nx=p.x+d.x, ny=p.y+d.y;
+                if(canStep(p.x,p.y,nx,ny)){
+                    if(nx===opp.x && ny===opp.y){
+                        const jx=nx+d.x, jy=ny+d.y;
+                        if(canStep(nx,ny,jx,jy)) m.push({x:jx,y:jy});
+                        else {
+                            if(d.x===0){ if(canStep(nx,ny,nx-1,ny))m.push({x:nx-1,y:ny}); if(canStep(nx,ny,nx+1,ny))m.push({x:nx+1,y:ny}); }
+                            else{ if(canStep(nx,ny,nx,ny-1))m.push({x:nx,y:ny-1}); if(canStep(nx,ny,nx,ny+1))m.push({x:nx,y:ny+1}); }
+                        }
+                    } else m.push({x:nx,y:ny});
+                }
+            });
+            return m;
+        }
+        function canPlaceWall(x,y,o) {
+            if(x<0||x>=8||y<0||y>=8)return false;
+            if(state.placedWalls.has(`${x},${y},h`)||state.placedWalls.has(`${x},${y},v`))return false;
+            if(o==='h'&&(state.placedWalls.has(`${x-1},${y},h`)||state.placedWalls.has(`${x+1},${y},h`)))return false;
+            if(o==='v'&&(state.placedWalls.has(`${x},${y-1},v`)||state.placedWalls.has(`${x},${y+1},v`)))return false;
+            const k=`${x},${y},${o}`; state.placedWalls.add(k);
+            const ok = getShortestPath(1)!==-1 && getShortestPath(2)!==-1;
+            state.placedWalls.delete(k); return ok;
+        }
+        function getShortestPath(pid) {
+            const q=[{x:state.pos[pid].x, y:state.pos[pid].y, d:0}]; const v=new Set([`${q[0].x},${q[0].y}`]); const g=state.pos[pid].goal;
+            while(q.length){
+                const c=q.shift(); if(c.y===g)return c.d;
+                [{x:0,y:1},{x:0,y:-1},{x:1,y:0},{x:-1,y:0}].forEach(d=>{
+                    const nx=c.x+d.x, ny=c.y+d.y;
+                    if(canStep(c.x,c.y,nx,ny)&&!v.has(`${nx},${ny}`)){ v.add(`${nx},${ny}`); q.push({x:nx,y:ny,d:c.d+1}); }
+                });
+            } return -1;
+        }
+
+        // --- Interaction ---
+        function renderWallDocks() {
+            populateDock('dock-p1', 1, true);
+            populateDock('dock-p2', 2, true);
+        }
+
+        function populateDock(elId, pid, clickable) {
+            const el = document.getElementById(elId);
+            el.innerHTML = `<div class="dock-label">P${pid} 牆壁</div>`;
+            if (el.style.display === 'none') return;
+
+            const count = state.walls[pid];
+            el.className = `wall-dock-container ${state.turn === pid ? 'active' : 'inactive'}`;
+            if(state.gameType === 'online' && state.turn !== state.online.myPid) {
+                 el.className = `wall-dock-container inactive`;
+            }
+
+            for(let i=0; i<count; i++){ 
+                let w = document.createElement('div'); 
+                w.className = 'wall-item'; 
+                if(pid === 2) w.style.backgroundColor = '#448aff';
+                
+                let allowDrag = false;
+                if (state.gameType !== 'online') {
+                    if (state.turn === pid && clickable) allowDrag = true;
+                } else {
+                    if (state.turn === pid && pid === state.online.myPid) allowDrag = true;
+                }
+                
+                if (allowDrag) {
+                    w.onmousedown = e => startWallDrag(e, pid, w);
+                    w.ontouchstart = e => startWallDrag(e, pid, w);
+                }
+                el.appendChild(w); 
+            }
+        }
+
+        function getPointerData(e, fromDock=false) {
+            const w=window.innerWidth, h=window.innerHeight;
+            let cx, cy, isTouch=false;
+            
+            if(e.changedTouches && e.changedTouches.length){ cx=e.changedTouches[0].clientX; cy=e.changedTouches[0].clientY; isTouch=true; }
+            else if(e.touches && e.touches.length){ cx=e.touches[0].clientX; cy=e.touches[0].clientY; isTouch=true; }
+            else { cx=e.clientX; cy=e.clientY; }
+            
+            if(fromDock && isTouch) {
+                cy -= DRAG_OFFSET_PIXELS; 
+            }
+            
+            let cam, ndcx;
+            
+            if (state.viewMode === 'single') {
+                ndcx = (cx / w) * 2 - 1;
+                cam = cameraSingle;
+            } else if (state.viewMode === 'online') {
+                ndcx = (cx / w) * 2 - 1;
+                cam = state.online.myPid === 1 ? cameraP1 : cameraP2;
+            } else { 
+                if (cx < w/2) {
+                    ndcx = (cx / (w/2)) * 2 - 1;
+                    cam = cameraP1;
+                } else {
+                    ndcx = ((cx - w/2) / (w/2)) * 2 - 1;
+                    cam = cameraP2;
+                }
+            }
+            
+            const ndcy = -(cy/h)*2+1; 
+            const rawY = isTouch ? (e.touches && e.touches.length ? e.touches[0].clientY : e.changedTouches[0].clientY) : e.clientY;
+            
+            return { x:ndcx, y:ndcy, camera:cam, rawY:rawY, isTouch:isTouch };
+        }
+
+        function showValidMoves() {
+            objects.highlights.forEach(h=>scene.remove(h)); objects.highlights=[];
+            if(state.processing || state.isAiThinking) return;
+            if(state.gameType === 'pve' && state.turn === 2) return;
+            if(state.gameType === 'online' && state.turn !== state.online.myPid) return;
+
+            getValidMoves(state.turn).forEach(m=>{
+                const g=new THREE.BoxGeometry(CELL_W*0.9,0.5,CELL_W*0.9); 
+                const mt=new THREE.MeshBasicMaterial({color:COLORS.highlight, transparent:true, opacity:0.5});
+                const ms=new THREE.Mesh(g,mt); 
+                const p=getGridPos(m.x,m.y); 
+                ms.position.set(p.x,1.6,p.z); 
+                ms.userData={type:'move',x:m.x,y:m.y};
+                scene.add(ms); objects.highlights.push(ms);
+            });
+            requestRender();
+        }
+
+        function setupEvents() {
+            window.addEventListener('mousemove',e=>{ handleMove(e); if(!state.paused) requestRender(); }); 
+            window.addEventListener('touchmove',e=>{ handleMove(e); if(!state.paused) requestRender(); }, {passive:false});
+            window.addEventListener('mouseup',handleUp); 
+            window.addEventListener('touchend',handleUp);
+            window.addEventListener('mousedown',handleClick); 
+            window.addEventListener('touchstart',handleClick,{passive:false});
+            window.addEventListener('resize',()=>{
+                const w=window.innerWidth, h=window.innerHeight; 
+                renderer.setSize(w,h);
+                cameraP1.aspect=(w/2)/h; cameraP1.updateProjectionMatrix(); 
+                cameraP2.aspect=(w/2)/h; cameraP2.updateProjectionMatrix(); 
+                cameraSingle.aspect=w/h; cameraSingle.updateProjectionMatrix();
+                if(state.viewMode === 'online') {
+                    cameraP1.aspect = w/h; cameraP1.updateProjectionMatrix();
+                    cameraP2.aspect = w/h; cameraP2.updateProjectionMatrix();
+                }
+                requestRender();
+            });
+        }
+        
+        function startWallDrag(e, pid, el) {
+            if(!state.started||state.paused||state.processing)return; 
+            if(state.turn!==pid)return;
+            if(state.gameType === 'online' && state.turn !== state.online.myPid) return;
+            if(state.gameType === 'pve' && pid === 2) return;
+
+            if(e.cancelable) e.preventDefault(); e.stopPropagation();
+            state.drag.active=true; state.drag.sourceEl=el; el.classList.add('dragging'); 
+            objects.ghostWall.visible=true; handleMove(e);
+        }
+
+        function handleMove(e) {
+            if(!state.drag.active)return; if(e.cancelable)e.preventDefault();
+            const ptr = getPointerData(e, true);
+            
+            let isOverDock = false; const h = window.innerHeight;
+            if(ptr.rawY > h-120 || ptr.rawY < 120) isOverDock=true; 
+            
+            if(isOverDock){ objects.ghostWall.visible=false; state.drag.valid=false; requestRender(); return; } 
+            else objects.ghostWall.visible=true;
+            
+            if(!ptr.camera)return;
+            mouse.set(ptr.x, ptr.y); raycaster.setFromCamera(mouse, ptr.camera);
+            const hits = raycaster.intersectObject(dragPlane);
+            
+            if(hits.length>0){
+                const pt=hits[0].point; 
+                
+                const st=CELL_W+GAP_W; const s=-(BOARD_W/2)+CELL_W+GAP_W/2;
+                let gx=Math.round((pt.x-s)/st), gy=Math.round((pt.z-s)/st);
+                
+                let diffX=Math.abs(((pt.x-s)/st)-gx), diffY=Math.abs(((pt.z-s)/st)-gy);
+                if(state.drag.orientation==='h') diffY-=0.1; else diffX-=0.1;
+                state.drag.orientation = diffX<diffY?'v':'h';
+                
+                if(gx<0)gx=0; if(gx>7)gx=7; if(gy<0)gy=0; if(gy>7)gy=7;
+                
+                if(gx!==state.drag.gx || gy!==state.drag.gy){ 
+                    audio.drag.currentTime=0; audio.drag.play().catch(()=>{}); 
+                }
+                state.drag.gx=gx; state.drag.gy=gy;
+                
+                const valid=canPlaceWall(gx,gy,state.drag.orientation); state.drag.valid=valid;
+                const p=getWallPos(gx,gy,state.drag.orientation); 
+                objects.ghostWall.position.set(p.x,6,p.z); 
+                objects.ghostWall.rotation.y=p.angle;
+                objects.ghostWall.material.color.setHex(valid?COLORS.wallGhostValid:COLORS.wallGhostInvalid);
+                requestRender();
+            }
+        }
+
+        function handleUp(e) {
+            if(state.drag.active){
+                state.drag.active=false; objects.ghostWall.visible=false;
+                
+                const ptr=getPointerData(e); 
+                let isOverDock=false; const h=window.innerHeight;
+                if(ptr.rawY > h-120 || ptr.rawY < 120) isOverDock=true; 
+
+                if(state.drag.valid && !isOverDock){ 
+                    executeAction({
+                        type: 'wall',
+                        x: state.drag.gx,
+                        y: state.drag.gy,
+                        orientation: state.drag.orientation,
+                        by: state.turn
+                    }, false);
+                    if(state.drag.sourceEl) state.drag.sourceEl.remove(); 
+                } else {
+                    if(state.drag.sourceEl) state.drag.sourceEl.classList.remove('dragging');
+                }
+                state.drag.sourceEl=null;
+                requestRender();
+            }
+        }
+
+        function handleClick(e) {
+            if(state.drag.active||!state.started||state.paused||state.isAiThinking||state.processing)return;
+            if(state.gameType === 'online' && state.turn !== state.online.myPid) return;
+            if(state.gameType === 'pve' && state.turn === 2) return;
+            
+            if(e.target.closest('.wall-dock-container')||e.target.closest('#settings-menu')||e.target.closest('.action-btn'))return;
+            
+            const ptr=getPointerData(e,false); if(!ptr.camera)return;
+            mouse.set(ptr.x,ptr.y); raycaster.setFromCamera(mouse,ptr.camera); raycaster.params.Line.threshold=5;
+            const hits=raycaster.intersectObjects(objects.highlights);
+            
+            if(hits.length>0){ 
+                e.preventDefault(); 
+                const d=hits[0].object.userData; 
+                if(d.type==='move'){ 
+                    executeAction({ type: 'move', x: d.x, y: d.y, by: state.turn }, false); 
+                } 
+            }
+        }
+
+        // --- Unified Action Handler ---
+        function executeAction(act, isRemote) {
+            if(state.processing) return;
+
+            // FIX 1: IMMEDIATELY CLEAR HIGHLIGHTS
+            objects.highlights.forEach(h => scene.remove(h));
+            objects.highlights = [];
+            requestRender();
+            
+            if(!isRemote) { 
+                if(state.gameType==='online' && state.turn!==state.online.myPid) return; 
+                state.processing=true; 
+                saveHistory(); 
+            }
+            else {
+                 if(state.gameType === 'online' && act.by === state.online.myPid) {
+                     state.processing = false;
+                     return;
+                 }
+            }
+
+            if(act.type==='move'){ 
+                state.pos[act.by].x = act.x; 
+                state.pos[act.by].y = act.y; 
+                const p = getGridPos(act.x, act.y); 
+                objects.pawns[act.by].target.copy(new THREE.Vector3(p.x, 3, p.z)); 
+                audio.move.currentTime=0; audio.move.play().catch(()=>{}); 
+                state.isAnimating = true;
+                requestRender();
+            } else { 
+                state.walls[act.by]--; 
+                state.placedWalls.add(`${act.x},${act.y},${act.orientation}`); 
+                createWallMesh(act.x, act.y, act.orientation, true); 
+                audio.wall.currentTime=0; audio.wall.play().catch(()=>{}); 
+            }
+
+            if(!isRemote && state.gameType==='online') {
+                const actionData = { ...act, by: state.turn, ts: Date.now() };
+                db.collection('rooms').doc(currentRoomId).update({
+                    "gameState.lastAction": actionData
+                });
+            }
+
+            if(state.pos[act.by].y === state.pos[act.by].goal) { 
+                audio.win.play().catch(()=>{}); 
+                const winText = document.getElementById('winner-text');
+                winText.innerText = (act.by===1?"P1 (紅)":"P2 (藍)")+" 獲勝!"; 
+                winText.style.color = act.by===1?'#ff5252':'#448aff';
+                document.getElementById('victory-screen').style.display='flex'; 
+                state.paused=true; 
+                state.processing=false; 
+                requestRender();
+                return; 
+            }
+
+            state.turn = state.turn===1?2:1; 
+            renderWallDocks(); 
+            updateHUD();
+
+            setTimeout(()=>{ 
+                state.processing=false; 
+                if(!isRemote){ 
+                    if(state.gameType==='pve' && state.turn===2) triggerAI(2); 
+                    else if(state.gameType !== 'online' || state.turn === state.online.myPid) showValidMoves(); 
+                } else { 
+                    if(state.gameType==='online' && state.turn===state.online.myPid) showValidMoves(); 
+                } 
+            }, 300);
+        }
+
+        function updateHUD() {
+            const t = document.getElementById('turn-msg');
+            if(state.gameType === 'online') {
+                t.innerText = (state.turn === state.online.myPid) ? "你的回合" : "對手思考中...";
+            } else {
+                t.innerText = `P${state.turn} 回合`;
+            }
+            t.style.color = state.turn===1?'#ff5252':'#448aff';
+            
+            const isP1Turn = state.turn === 1;
+            const isP2Turn = state.turn === 2;
+            
+            document.getElementById('dock-p1').classList.toggle('active', isP1Turn); 
+            document.getElementById('dock-p2').classList.toggle('active', isP2Turn);
+            document.getElementById('undo-btn').style.opacity = state.history.length>0?1:0.5;
+            
+            renderWallDocks();
+        }
+
+        // --- AI (Minimax) ---
+        async function triggerAI(pid) {
+            if(state.paused) return;
+            state.isAiThinking = true;
+            document.getElementById('ai-thinking').style.display='block';
+            objects.highlights.forEach(h=>scene.remove(h)); objects.highlights=[];
+            
+            requestRender();
+
+            setTimeout(() => {
+                let move = null;
+                try { move = minimaxRoot(3, pid); } catch(e){}
+                if(!move) {
+                    const v = getValidMoves(pid);
+                    if(v.length>0) move = {type:'move', x:v[0].x, y:v[0].y};
+                }
+                state.isAiThinking = false;
+                document.getElementById('ai-thinking').style.display='none';
+                if(move) executeAction({...move, by: pid}, false);
+            }, 50);
+        }
+
+        function evaluateBoard(pid) {
+            const myDist = getShortestPath(pid);
+            const oppPid = pid===1?2:1;
+            const oppDist = getShortestPath(oppPid);
+            if(myDist === -1) return -10000;
+            if(oppDist === -1) return 10000;
+            return (oppDist - myDist) * 15 + (state.walls[pid] - state.walls[oppPid]) * 2 + Math.random();
+        }
+
+        function minimaxRoot(depth, pid) {
+            let bestScore = -Infinity; let bestMoves = [];
+            const moves = getAllCandidateMoves(pid);
+            moves.sort((a,b) => (a.type==='move' ? -1 : 1));
+            for(let move of moves) {
+                applyMove(move, pid);
+                let score = minimax(depth-1, -Infinity, Infinity, false, pid);
+                undoMoveCalc(move, pid);
+                if(score > bestScore){ bestScore=score; bestMoves=[move]; }
+                else if(score===bestScore) bestMoves.push(move);
+            }
+            if(bestMoves.length>0) return bestMoves[Math.floor(Math.random()*bestMoves.length)];
+            return null;
+        }
+
+        function minimax(depth, alpha, beta, isMaximizing, rootPid) {
+            if(depth===0) return evaluateBoard(rootPid);
+            const currentPid = isMaximizing ? rootPid : (rootPid===1?2:1);
+            if(state.pos[currentPid].y === state.pos[currentPid].goal) return isMaximizing ? 10000 : -10000;
+
+            const moves = getAllCandidateMoves(currentPid);
+            if(isMaximizing) {
+                let maxEval = -Infinity;
+                for(let move of moves) {
+                    applyMove(move, currentPid);
+                    let eval = minimax(depth-1, alpha, beta, false, rootPid);
+                    undoMoveCalc(move, currentPid);
+                    maxEval = Math.max(maxEval, eval); alpha = Math.max(alpha, eval);
+                    if(beta <= alpha) break;
+                }
+                return maxEval;
+            } else {
+                let minEval = Infinity;
+                for(let move of moves) {
+                    applyMove(move, currentPid);
+                    let eval = minimax(depth-1, alpha, beta, true, rootPid);
+                    undoMoveCalc(move, currentPid);
+                    minEval = Math.min(minEval, eval); beta = Math.min(beta, eval);
+                    if(beta <= alpha) break;
+                }
+                return minEval;
+            }
+        }
+
+        function getAllCandidateMoves(pid) {
+            const candidates = []; 
+            getValidMoves(pid).forEach(m => candidates.push({ type: 'move', x: m.x, y: m.y }));
+            
+            if(state.walls[pid] > 0) {
+                const range = 1; 
+                const targets = [state.pos[1], state.pos[2]];
+                targets.forEach(t => {
+                    for(let dx=-range; dx<=range; dx++) for(let dy=-range; dy<=range; dy++) {
+                        let wx=t.x+dx; let wy=t.y+dy;
+                        if(wx<0||wx>7||wy<0||wy>7) continue;
+                        ['h','v'].forEach(o => {
+                            if(canPlaceWall(wx,wy,o)) candidates.push({type:'wall', x:wx, y:wy, orientation:o});
+                        });
+                    }
+                });
+            }
+            return candidates;
+        }
+
+        function applyMove(move, pid) {
+            if(move.type === 'move') { move.prevX = state.pos[pid].x; move.prevY = state.pos[pid].y; state.pos[pid].x = move.x; state.pos[pid].y = move.y; }
+            else { state.walls[pid]--; state.placedWalls.add(`${move.x},${move.y},${move.orientation}`); }
+        }
+        function undoMoveCalc(move, pid) {
+            if(move.type === 'move') { state.pos[pid].x = move.prevX; state.pos[pid].y = move.prevY; }
+            else { state.walls[pid]++; state.placedWalls.delete(`${move.x},${move.y},${move.orientation}`); }
+        }
+
+        // --- Online Lobby Logic ---
+        function showToast(m){ const t=document.getElementById('toast'); t.innerText=m; t.style.opacity=1; setTimeout(()=>t.style.opacity=0,2000); }
+        
+        function openLobby() {
+            document.getElementById('start-screen').style.display='none';
+            document.getElementById('lobby-screen').style.display='flex';
+            
+            unsubscribeRooms = db.collection('rooms').where('status','==','waiting').onSnapshot(s => {
+                const l = document.getElementById('room-list');
+                l.innerHTML = '';
+                if(s.empty) {
+                    l.innerHTML = '<div style="text-align:center;padding:20px;color:#888">目前無房間，請建立一個！</div>';
+                    return;
+                }
+                s.forEach(d => {
+                    const r = d.data();
+                    const div = document.createElement('div');
+                    div.className = `room-item ${r.isPrivate?'private':''}`;
+                    div.innerHTML = `<div><div class="room-name">${r.name}</div><div class="room-status">${r.isPrivate?'🔒':'🌐'} ${r.hostName}</div></div><button class="menu-btn small online" style="margin:0;width:auto;padding:5px 15px;font-size:14px;">加入</button>`;
+                    div.onclick = () => tryJoin(d.id, r);
+                    l.appendChild(div);
+                });
+            });
+        }
+        
+        function closeLobby() {
+            if(unsubscribeRooms) unsubscribeRooms();
+            document.getElementById('lobby-screen').style.display='none';
+            document.getElementById('start-screen').style.display='flex';
+        }
+
+        function showCreateRoom() { document.getElementById('create-modal').style.display='flex'; }
+        function togglePasswordInput() { document.getElementById('room-password').style.display = document.getElementById('is-private').checked?'block':'none'; }
+        
+        function createRoom() {
+            const name = document.getElementById('new-room-name').value || "Room";
+            const isPrivate = document.getElementById('is-private').checked;
+            const pwd = document.getElementById('room-password').value;
+            if(isPrivate && pwd.length !== 6) return showToast("請輸入6位數密碼");
+            
+            db.collection('rooms').add({
+                name, isPrivate, password: isPrivate ? pwd : null, hostId: currentUser.uid, hostName: "P-"+currentUser.uid.substring(0,4),
+                status: 'waiting', players: { p1: currentUser.uid }, gameState: { turn: 1 },
+                heartbeat: { p1: Date.now() } // Init heartbeat
+            }).then(d => {
+                currentRoomId = d.id; 
+                state.online.myPid = 1; 
+                document.getElementById('create-modal').style.display='none'; 
+                waitForP2(d.id);
+            });
+        }
+
+        function waitForP2(rid) {
+            document.getElementById('wait-room-id').innerText = rid.substring(0,6);
+            document.getElementById('waiting-modal').style.display = 'flex';
+            
+            unsubscribeGame = db.collection('rooms').doc(rid).onSnapshot(d => {
+                if(!d.exists) return resetGame(true);
+                const da = d.data();
+                if(da.players.p2) {
+                    if(unsubscribeGame) unsubscribeGame();
+                    document.getElementById('waiting-modal').style.display = 'none'; 
+                    document.getElementById('lobby-screen').style.display = 'none'; 
+                    startGame('online');
+                }
+            });
+        }
+
+        let pendingJoinId; 
+        function tryJoin(rid, r) {
+            if(r.isPrivate) {
+                pendingJoinId = rid; document.getElementById('join-room-name').innerText = r.name; document.getElementById('password-modal').style.display = 'flex';
+            } else doJoin(rid);
+        }
+        
+        function submitPassword() {
+            db.collection('rooms').doc(pendingJoinId).get().then(d => {
+                if(d.data().password == document.getElementById('join-password').value) {
+                    document.getElementById('password-modal').style.display = 'none'; doJoin(pendingJoinId);
+                } else showToast("密碼錯誤");
+            });
+        }
+        
+        function closePasswordModal() { document.getElementById('password-modal').style.display='none'; }
+        
+        function doJoin(rid) {
+            db.collection('rooms').doc(rid).update({
+                "players.p2": currentUser.uid, status: 'playing', "gameState.turn": 1,
+                [`heartbeat.p2`]: Date.now() // Init heartbeat
+            }).then(() => {
+                currentRoomId = rid; 
+                state.online.myPid = 2; 
+                document.getElementById('lobby-screen').style.display = 'none'; 
+                startGame('online');
+            }).catch(() => showToast("加入失敗"));
+        }
+
+        function subscribeToGame(rid) {
+            if(unsubscribeGame) unsubscribeGame();
+            state.lastOpponentSeen = Date.now(); // Reset seen
+            
+            unsubscribeGame = db.collection('rooms').doc(rid).onSnapshot(d => {
+                if(!d.exists) return resetGame(true); 
+                const da = d.data(); 
+                
+                // --- Disconnect Detection Logic (Read Side) ---
+                if(da.heartbeat) {
+                    const opponentPid = state.online.myPid === 1 ? 'p2' : 'p1';
+                    if(da.heartbeat[opponentPid]) {
+                        state.lastOpponentSeen = da.heartbeat[opponentPid];
+                    }
+                }
+
+                // Handle remote actions
+                if(da.gameState.lastAction) {
+                    const act = da.gameState.lastAction;
+                    if(act.ts > state.online.lastProcessedTs && act.by !== state.online.myPid) {
+                        state.online.lastProcessedTs = act.ts;
+                        executeAction(act, true);
+                    }
+                }
+            });
+        }
+
+        // --- Heartbeat Logic (Write Side + Check) ---
+        function startHeartbeat() {
+            if(heartbeatInterval) clearInterval(heartbeatInterval);
+            state.lastOpponentSeen = Date.now(); // Give some buffer at start
+
+            heartbeatInterval = setInterval(() => {
+                if(!state.started || state.paused || !currentRoomId) return;
+
+                // 1. Write my heartbeat
+                const myPid = state.online.myPid;
+                db.collection('rooms').doc(currentRoomId).update({
+                    [`heartbeat.p${myPid}`]: Date.now()
+                }).catch(e => console.warn("Heartbeat fail", e));
+
+                // 2. Check opponent heartbeat
+                // If we haven't seen an update in > 10 seconds
+                if(Date.now() - state.lastOpponentSeen > 10000) {
+                    alert("對手連線中斷，回到大廳。");
+                    resetGame(true);
+                }
+
+            }, 2000); // Update every 2 seconds
+        }
+
+        function leaveRoom() {
+            if(currentRoomId) {
+                if(state.online.myPid === 1) db.collection('rooms').doc(currentRoomId).delete();
+                else db.collection('rooms').doc(currentRoomId).update({"players.p2": firebase.firestore.FieldValue.delete()});
+            }
+            resetGame(true);
+        }
+
+        // --- Render Loop (Optimized) ---
+        function renderLoop() {
+            renderRequested = false; 
+
+            // Logic Check for Animations
+            let isMoving = false;
+            for(let id in objects.pawns) {
+                const p = objects.pawns[id];
+                if(p.mesh.position.distanceTo(p.target) > 0.05) {
+                    p.mesh.position.lerp(p.target, 0.2);
+                    isMoving = true;
+                }
+            }
+            objects.wallGroup.children.forEach(w => {
+                if(w.userData.targetY && w.position.y > w.userData.targetY) {
+                    w.position.y = THREE.MathUtils.lerp(w.position.y, w.userData.targetY, 0.2);
+                    if(Math.abs(w.position.y - w.userData.targetY) > 0.01) isMoving = true;
+                }
+            });
+
+            if (isMoving) {
+                state.isAnimating = true;
+                requestAnimationFrame(renderLoop); 
+            } else {
+                state.isAnimating = false;
+            }
+            
+            // Actual Draw
+            const w = window.innerWidth, h = window.innerHeight; renderer.clear();
+            
+            if (state.viewMode === 'online') {
+                renderer.setViewport(0, 0, w, h); renderer.setScissor(0, 0, w, h);
+                const activeCam = state.online.myPid === 1 ? cameraP1 : cameraP2;
+                activeCam.aspect = w/h;
+                activeCam.updateProjectionMatrix();
+                renderer.render(scene, activeCam);
+            }
+            else if (state.viewMode === 'single') { 
+                renderer.setViewport(0, 0, w, h); renderer.setScissor(0, 0, w, h); 
+                renderer.render(scene, cameraSingle); 
+            } else { 
+                renderer.setViewport(0, 0, w/2, h); renderer.setScissor(0, 0, w/2, h); renderer.render(scene, cameraP1);
+                renderer.setViewport(w/2, 0, w/2, h); renderer.setScissor(w/2, 0, w/2, h); renderer.render(scene, cameraP2);
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
